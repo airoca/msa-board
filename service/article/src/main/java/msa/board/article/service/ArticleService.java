@@ -1,5 +1,6 @@
 package msa.board.article.service;
 
+import msa.board.article.service.response.ArticlePageResponse;
 import msa.board.common.snowflake.Snowflake;
 import msa.board.article.entity.Article;
 import msa.board.article.repository.ArticleRepository;
@@ -38,5 +39,18 @@ public class ArticleService {
     @Transactional
     public void delete(Long articleId) {
         articleRepository.deleteById(articleId);
+    }
+
+    // offset paging
+    public ArticlePageResponse readAll(Long boardId, Long page, Long pageSize) {
+        return ArticlePageResponse.of(
+                articleRepository.findAll(boardId, (page - 1) * pageSize, pageSize).stream()
+                        .map(ArticleResponse::from)
+                        .toList(),
+                articleRepository.count(
+                        boardId,
+                        PageLimitCalculator.calculatePageLimit(page, pageSize, 10L)
+                )
+        );
     }
 }

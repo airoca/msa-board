@@ -2,7 +2,9 @@ package msa.board.article.api;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import msa.board.article.service.response.ArticlePageResponse;
 import msa.board.article.service.response.ArticleResponse;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
 
@@ -27,7 +29,7 @@ public class ArticleApiTest {
 
     @Test
     void readTest() {
-        ArticleResponse response = read(121530268440289280L);
+        ArticleResponse response = read(256774362492370973L);
         System.out.println("response = " + response);
     }
 
@@ -40,8 +42,8 @@ public class ArticleApiTest {
 
     @Test
     void updateTest() {
-        update(121530268440289280L);
-        ArticleResponse response = read(121530268440289280L);
+        update(256774362492370973L);
+        ArticleResponse response = read(256774362492370973L);
         System.out.println("response = " + response);
     }
 
@@ -55,8 +57,23 @@ public class ArticleApiTest {
     @Test
     void deleteTest() {
         restClient.delete()
-                .uri("/v1/articles/{articleId}", 121530268440289280L)
+                .uri("/v1/articles/{articleId}", 256774362492370973L)
                 .retrieve();
+    }
+
+    @Test
+    void readAllTest() {
+        // offset paging
+        ArticlePageResponse response = restClient.get()
+                .uri("/v1/articles?boardId=1&pageSize=30&page=50000")
+                .retrieve()
+                .body(ArticlePageResponse.class);
+
+        Assertions.assertNotNull(response);
+        System.out.println("response.getArticleCount() = " + response.getArticleCount());
+        for (ArticleResponse article : response.getArticles()) {
+            System.out.println("articleId = " + article.getArticleId());
+        }
     }
 
     @Getter

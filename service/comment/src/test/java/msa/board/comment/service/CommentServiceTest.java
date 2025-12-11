@@ -1,8 +1,7 @@
-package msa.board.article.service;
+package msa.board.comment.service;
 
 import msa.board.comment.entity.Comment;
 import msa.board.comment.repository.CommentRepository;
-import msa.board.comment.service.CommentService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

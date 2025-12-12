@@ -2,7 +2,8 @@ package msa.board.comment.data;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
-import msa.board.comment.entity.Comment;
+import msa.board.comment.entity.CommentPath;
+import msa.board.comment.entity.CommentV2;
 import msa.board.common.snowflake.Snowflake;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,7 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 @SpringBootTest
-public class DataInitializer {
+public class DataInitializerV2 {
 
     @PersistenceContext
     EntityManager entityManager;
@@ -30,8 +31,10 @@ public class DataInitializer {
     void initialize() throws InterruptedException {
         ExecutorService executorService = Executors.newFixedThreadPool(10);
         for(int i = 0; i < EXECUTE_COUNT; i++) {
+            int start = i * BULK_INSERT_SIZE;
+            int end = (i + 1) * BULK_INSERT_SIZE;
             executorService.submit(() -> {
-                insert();
+                insert(start, end);
                 latch.countDown();
                 System.out.println("latch.getCount() = " + latch.getCount());
             });
@@ -40,20 +43,31 @@ public class DataInitializer {
         executorService.shutdown();
     }
 
-    void insert() {
+    void insert(int start, int end) {
         transactionTemplate.executeWithoutResult(status -> {
-            Comment prev = null;
-            for(int i = 0; i < BULK_INSERT_SIZE; i++) {
-                Comment comment = Comment.create(
+            for(int i = start; i < end; i++) {
+                CommentV2 comment = CommentV2.create(
                         snowflake.nextId(),
                         "content",
-                        i % 2 == 0 ? null : prev.getCommentId(),
                         1L,
-                        1L
+                        1L,
+                        toPath(i)
                 );
-                prev = comment;
                 entityManager.persist(comment);
             }
         });
+    }
+
+    private static final String CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+    private static final int DEPTH_CHUNK_SIZE = 5;
+
+    CommentPath toPath(int value) {
+        String path = "";
+        for (int i=0; i < DEPTH_CHUNK_SIZE; i++) {
+            path = CHARSET.charAt(value % CHARSET.length()) + path;
+            value /= CHARSET.length();
+        }
+        return CommentPath.create(path);
     }
 }

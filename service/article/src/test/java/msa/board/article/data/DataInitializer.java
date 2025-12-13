@@ -15,6 +15,7 @@ import java.util.concurrent.Executors;
 
 @SpringBootTest
 public class DataInitializer {
+
     @PersistenceContext
     EntityManager entityManager;
     @Autowired

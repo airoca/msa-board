@@ -11,10 +11,9 @@ import lombok.ToString;
 @Embeddable
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class CommentPath {
+
     private String path;
-
     private static final String CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
     private static final int DEPTH_CHUNK_SIZE = 5;
     private static final int MAX_DEPTH = 5;
 

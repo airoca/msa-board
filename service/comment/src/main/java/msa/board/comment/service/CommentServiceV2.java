@@ -8,6 +8,10 @@ import msa.board.comment.repository.CommentRepositoryV2;
 import msa.board.comment.service.request.CommentCreateRequestV2;
 import msa.board.comment.service.response.CommentPageResponse;
 import msa.board.comment.service.response.CommentResponse;
+import msa.board.common.event.EventType;
+import msa.board.common.event.payload.CommentCreatedEventPayload;
+import msa.board.common.event.payload.CommentDeletedEventPayload;
+import msa.board.common.outboxmessagerelay.OutboxEventPublisher;
 import msa.board.common.snowflake.Snowflake;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -20,10 +24,10 @@ import static java.util.function.Predicate.not;
 @Service
 @RequiredArgsConstructor
 public class CommentServiceV2 {
-
     private final Snowflake snowflake = new Snowflake();
     private final CommentRepositoryV2 commentRepository;
     private final ArticleCommentCountRepository articleCommentCountRepository;
+    private final OutboxEventPublisher outboxEventPublisher;
 
     @Transactional
     public CommentResponse create(CommentCreateRequestV2 request) {
@@ -48,6 +52,20 @@ public class CommentServiceV2 {
                     ArticleCommentCount.init(request.getArticleId(), 1L)
             );
         }
+
+        outboxEventPublisher.publish(
+                EventType.COMMENT_CREATED,
+                CommentCreatedEventPayload.builder()
+                        .commentId(comment.getCommentId())
+                        .content(comment.getContent())
+                        .articleId(comment.getArticleId())
+                        .writerId(comment.getWriterId())
+                        .deleted(comment.getDeleted())
+                        .createdAt(comment.getCreatedAt())
+                        .articleCommentCount(count(comment.getArticleId()))
+                        .build(),
+                comment.getArticleId()
+        );
 
         return CommentResponse.from(comment);
     }
@@ -78,6 +96,20 @@ public class CommentServiceV2 {
                     } else {
                         delete(comment);
                     }
+
+                    outboxEventPublisher.publish(
+                            EventType.COMMENT_DELETED,
+                            CommentDeletedEventPayload.builder()
+                                    .commentId(comment.getCommentId())
+                                    .content(comment.getContent())
+                                    .articleId(comment.getArticleId())
+                                    .writerId(comment.getWriterId())
+                                    .deleted(comment.getDeleted())
+                                    .createdAt(comment.getCreatedAt())
+                                    .articleCommentCount(count(comment.getArticleId()))
+                                    .build(),
+                            comment.getArticleId()
+                    );
                 });
     }
 

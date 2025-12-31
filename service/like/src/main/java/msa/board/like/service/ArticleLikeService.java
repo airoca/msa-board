@@ -1,5 +1,9 @@
 package msa.board.like.service;
 
+import msa.board.common.event.EventType;
+import msa.board.common.event.payload.ArticleLikedEventPayload;
+import msa.board.common.event.payload.ArticleUnlikedEventPayload;
+import msa.board.common.outboxmessagerelay.OutboxEventPublisher;
 import msa.board.common.snowflake.Snowflake;
 import msa.board.like.entity.ArticleLike;
 import msa.board.like.entity.ArticleLikeCount;
@@ -13,10 +17,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class ArticleLikeService {
-
     private final Snowflake snowflake = new Snowflake();
     private final ArticleLikeRepository articleLikeRepository;
     private final ArticleLikeCountRepository articleLikeCountRepository;
+    private final OutboxEventPublisher outboxEventPublisher;
 
     public ArticleLikeResponse read(Long articleId, Long userId) {
         return articleLikeRepository.findByArticleIdAndUserId(articleId, userId)
@@ -41,6 +45,18 @@ public class ArticleLikeService {
                     ArticleLikeCount.init(articleId, 1L)
             );
         }
+
+        outboxEventPublisher.publish(
+                EventType.ARTICLE_LIKED,
+                ArticleLikedEventPayload.builder()
+                        .articleLikeId(articleLike.getArticleLikeId())
+                        .articleId(articleLike.getArticleId())
+                        .userId(articleLike.getUserId())
+                        .createdAt(articleLike.getCreatedAt())
+                        .articleLikeCount(count(articleLike.getArticleId()))
+                        .build(),
+                articleLike.getArticleId()
+        );
     }
 
     @Transactional
@@ -75,6 +91,18 @@ public class ArticleLikeService {
                     articleLikeRepository.delete(articleLike);
                     ArticleLikeCount articleLikeCount = articleLikeCountRepository.findLockedByArticleId(articleId).orElseThrow();
                     articleLikeCount.decrease();
+
+                    outboxEventPublisher.publish(
+                            EventType.ARTICLE_UNLIKED,
+                            ArticleUnlikedEventPayload.builder()
+                                    .articleLikeId(articleLike.getArticleLikeId())
+                                    .articleId(articleLike.getArticleId())
+                                    .userId(articleLike.getUserId())
+                                    .createdAt(articleLike.getCreatedAt())
+                                    .articleLikeCount(count(articleLike.getArticleId()))
+                                    .build(),
+                            articleLike.getArticleId()
+                    );
                 });
     }
 

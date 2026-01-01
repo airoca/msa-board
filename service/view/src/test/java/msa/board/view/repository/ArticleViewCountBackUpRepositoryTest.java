@@ -12,7 +12,6 @@ import static org.assertj.core.api.Assertions.*;
 
 @SpringBootTest
 class ArticleViewCountBackUpRepositoryTest {
-
     @Autowired
     ArticleViewCountBackUpRepository articleViewCountBackUpRepository;
     @PersistenceContext

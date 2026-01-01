@@ -7,7 +7,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 @RequiredArgsConstructor
 public class ArticleViewCountRepository {
-
     private final StringRedisTemplate redisTemplate;
 
     // view::article::{article_id}::view_count

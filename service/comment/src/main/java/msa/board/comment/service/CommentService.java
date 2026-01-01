@@ -17,7 +17,6 @@ import static java.util.function.Predicate.not;
 @Service
 @RequiredArgsConstructor
 public class CommentService {
-
     private final Snowflake snowflake = new Snowflake();
     private final CommentRepository commentRepository;
 

@@ -13,7 +13,6 @@ import java.util.List;
 @RestController
 @RequiredArgsConstructor
 public class ArticleController {
-
     private final ArticleService articleService;
 
     @GetMapping("/v1/articles/{articleId}")

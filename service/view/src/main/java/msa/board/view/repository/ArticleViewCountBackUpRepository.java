@@ -9,7 +9,6 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface ArticleViewCountBackUpRepository extends JpaRepository<ArticleViewCount, Long> {
-
     @Query(
             value = "update article_view_count set view_count = :viewCount " +
                     "where article_id = :articleId and view_count < :viewCount",

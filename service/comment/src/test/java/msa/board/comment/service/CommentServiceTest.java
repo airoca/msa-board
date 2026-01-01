@@ -16,7 +16,6 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class CommentServiceTest {
-
     @InjectMocks
     CommentService commentService;
     @Mock

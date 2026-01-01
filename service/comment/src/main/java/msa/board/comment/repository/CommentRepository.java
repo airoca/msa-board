@@ -10,7 +10,6 @@ import java.util.List;
 
 @Repository
 public interface CommentRepository extends JpaRepository<Comment, Long> {
-
     @Query(
             value = "select count(*) from (" +
                     "   select comment_id from comment " +

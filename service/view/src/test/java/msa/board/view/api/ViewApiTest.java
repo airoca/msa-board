@@ -8,7 +8,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ViewApiTest {
-
     RestClient restClient = RestClient.create("http://localhost:9005");
 
     @Test

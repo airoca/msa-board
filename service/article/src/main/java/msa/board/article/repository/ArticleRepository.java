@@ -10,7 +10,6 @@ import java.util.List;
 
 @Repository
 public interface ArticleRepository extends JpaRepository<Article, Long> {
-
     // offest paging (covering index)
     @Query(
             value = "select article.article_id, article.title, article.content, article.board_id, article.writer_id, " +

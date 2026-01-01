@@ -11,7 +11,6 @@ import java.util.Optional;
 
 @Repository
 public interface CommentRepositoryV2 extends JpaRepository<CommentV2, Long> {
-
     @Query(
             "select c from CommentV2 c where c.commentPath.path = :path"
     )

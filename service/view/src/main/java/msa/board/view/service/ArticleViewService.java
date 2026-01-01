@@ -10,7 +10,6 @@ import java.time.Duration;
 @Service
 @RequiredArgsConstructor
 public class ArticleViewService {
-
     private final ArticleViewCountRepository articleViewCountRepository;
     private final ArticleViewCountBackUpProcessor articleViewCountBackUpProcessor;
     private final ArticleViewDistributedLockRepository articleViewDistributedLockRepository;

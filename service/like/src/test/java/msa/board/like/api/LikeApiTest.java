@@ -9,7 +9,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class LikeApiTest {
-
     RestClient restClient = RestClient.create("http://localhost:9004");
 
     @Test

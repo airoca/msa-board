@@ -12,7 +12,6 @@ import java.util.List;
 @RestController
 @RequiredArgsConstructor
 public class CommentControllerV2 {
-
     private final CommentServiceV2 commentService;
 
     @GetMapping("/v2/comments/{commentId}")

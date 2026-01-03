@@ -32,7 +32,7 @@ public class ArticleApiTest {
 
     @Test
     void readTest() {
-        ArticleResponse response = read(256774362492370973L);
+        ArticleResponse response = read(265882086618980352L);
         System.out.println("response = " + response);
     }
 
@@ -46,7 +46,7 @@ public class ArticleApiTest {
     @Test
     void updateTest() {
         update(256774362492370973L);
-        ArticleResponse response = read(256774362492370973L);
+        ArticleResponse response = read(265882086618980352L);
         System.out.println("response = " + response);
     }
 
@@ -60,7 +60,7 @@ public class ArticleApiTest {
     @Test
     void deleteTest() {
         restClient.delete()
-                .uri("/v1/articles/{articleId}", 256774362492370973L)
+                .uri("/v1/articles/{articleId}", 265882086618980352L)
                 .retrieve();
     }
 

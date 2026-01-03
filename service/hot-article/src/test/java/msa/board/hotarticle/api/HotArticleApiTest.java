@@ -13,10 +13,12 @@ public class HotArticleApiTest {
     @Test
     void readAllTest() {
         List<HotArticleResponse> responses = restClient.get()
-                .uri("/v1/hot-articles/articles/date/{dateStr}", "20241212")
+                .uri("/v1/hot-articles/articles/date/{dateStr}", "20260104")
                 .retrieve()
                 .body(new ParameterizedTypeReference<List<HotArticleResponse>>() {
                 });
+
+        System.out.println("responses size = " + responses.size());
 
         for (HotArticleResponse response : responses) {
             System.out.println("response = " + response);

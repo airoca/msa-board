@@ -11,7 +11,7 @@ import org.springframework.web.client.RestClient;
 import java.util.List;
 
 public class CommentApiV2Test {
-    RestClient restClient = RestClient.create("http://localhost:9002");
+    RestClient restClient = RestClient.create("http://localhost:9001");
 
     @Test
     void create() {

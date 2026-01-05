@@ -8,7 +8,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class ViewApiTest {
-    RestClient restClient = RestClient.create("http://localhost:9005");
+    RestClient restClient = RestClient.create("http://localhost:9003");
 
     @Test
     void viewTest() throws InterruptedException {

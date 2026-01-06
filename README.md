@@ -1,6 +1,11 @@
 # MSA Board Project
 
+<details>
+<summary>
+
 ## ✅ Basic Infrastructure Assumptions
+
+</summary>
 
 ---
 
@@ -55,3 +60,5 @@
 - **Asynchronous Replication**
   - Maintains write performance.
   - Replicas may not immediately reflect the latest data.
+
+</details>

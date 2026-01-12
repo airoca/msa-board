@@ -155,3 +155,139 @@
     ```
 
 </details>
+
+<details>
+<summary>
+
+## ✅ Comment Service
+
+</summary>
+
+---
+
+### ☑ Comment List Retrieval API
+
+- Hierarchical structure (max 2 depth, infinite depth)
+  - A parent comment can be deleted **only after all child comments are deleted**.
+  - If there are no child comments, the comment is deleted immediately.
+  - If child comments exist, the comment is **soft-deleted (marked as deleted)**.
+- The design strategy differs depending on the maximum allowed depth.
+  - Max 2 depth → **Adjacency List**
+  - Infinite depth → **Path Enumeration**
+
+---
+
+### ☑ Max 2 Depth: Design
+
+- In hierarchical comments, the parent-child relationship must be represented.
+- Each comment holds a reference to its parent comment ID (`parent_comment_id`).
+- The primary key uses **Snowflake**, same as the Article service.
+- To ensure that all comments for a given article are queried from a single shard,
+  **sharding is based on `article_id`**.
+
+---
+
+### ☑ Max 2 Depth: Query
+
+- Sorting solely by creation time (`comment_id`) is insufficient due to hierarchy.
+- The following rules are applied:
+  - A parent comment is always created before its child comments.
+  - Child comments sharing the same parent are ordered by creation time.
+  - Therefore, sorting is based on:
+    - `(parent_comment_id ASC, comment_id ASC)`
+  - An index can be created as:
+    - `article_id ASC, parent_comment_id ASC, comment_id ASC`
+
+~~~sql
+-- Page 1
+SELECT *
+FROM comment
+WHERE article_id = {article_id}
+ORDER BY parent_comment_id ASC, comment_id ASC
+LIMIT {limit};
+
+-- Page 2 and beyond
+-- Cursor = last_parent_comment_id, last_comment_id
+SELECT *
+FROM comment
+WHERE article_id = {article_id}
+  AND (
+    parent_comment_id > {last_parent_comment_id}
+    OR (parent_comment_id = {last_parent_comment_id} AND comment_id > {last_comment_id})
+  )
+ORDER BY parent_comment_id ASC, comment_id ASC
+LIMIT {limit};
+~~~
+
+---
+
+### ☑ Infinite Depth: Design
+
+- For infinite depth, sorting requires knowledge of the **entire ancestor hierarchy**.
+- Representing each depth as a separate column leads to excessive schema complexity.
+- Instead, **Path Enumeration** is adopted, storing the hierarchy in a single string column.
+- Path encoding rules:
+  - Each depth is represented by **5 characters**.
+  - Depth 1 → 5 characters
+  - Depth 2 → 10 characters
+  - Depth 3 → 15 characters
+  - N depth → `(N * 5)` characters
+- Database collation uses `utf8mb4_bin` to preserve case-sensitive ordering,
+  allowing a richer path space.
+- A `path` column is introduced to represent hierarchy.
+- `parent_comment_id` is removed.
+- Although the structure supports infinite depth,
+  **depth is limited to 5 levels** for implementation simplicity and service constraints.
+
+---
+
+### ☑ Infinite Depth: Query
+
+- How is the path of a new child comment determined?
+- The new path is derived by:
+  - Finding the **largest existing path** among descendants (`descendantsTopPath`)
+  - Incrementing it by one at the child level (`childrenTopPath`)
+- Steps:
+  - Query all descendants that share the same `parentPath`
+  - Find the maximum path (`descendantsTopPath`)
+  - Trim it to `(newDepth * 5)` characters
+- Query to find `descendantsTopPath`:
+
+~~~sql
+SELECT path
+FROM comment_v2
+WHERE article_id = {article_id}
+  AND path > {parentPath}
+  AND path LIKE CONCAT({parentPath}, '%')
+ORDER BY path DESC
+LIMIT 1;
+~~~
+
+- Query performance remains consistent regardless of ascending or descending order
+  due to **Backward Index Scan**.
+- Backward index scan traverses the index in reverse order,
+  leveraging bidirectional pointers in the B+ Tree leaf nodes.
+- Path incrementation is performed by:
+  - Converting the base-62 path segment to a decimal number
+  - Adding `1`
+  - Converting it back to a base-62 string
+
+~~~sql
+-- Page 1
+SELECT *
+FROM comment_v2
+WHERE article_id = {article_id}
+ORDER BY path ASC
+LIMIT {limit};
+
+-- Page 2 and beyond
+SELECT *
+FROM comment_v2
+WHERE article_id = {article_id}
+  AND path > {last_path}
+ORDER BY path ASC
+LIMIT {limit};
+~~~
+
+</details>
+

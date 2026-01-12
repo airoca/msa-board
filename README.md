@@ -291,3 +291,177 @@ LIMIT {limit};
 
 </details>
 
+<details>
+<summary>
+
+## ✅ Like Service
+
+</summary>
+
+---
+
+### ☑ Like Design
+
+- Each user can like a specific article.
+- A like can be canceled.
+- Each user can perform the like action **only once per article**.
+- Therefore, only **one unique record** must exist per `(article_id, user_id)` pair.
+
+- A simple table can be created with a **unique index on `(article_id, user_id)`**.
+
+---
+
+### ☑ Like Count Query Design
+
+- In large-scale datasets, `COUNT(*)` queries can cause performance issues.
+- Unlike articles, like counts cannot be partially displayed.
+- Like counts must be displayed **accurately and quickly in real time**.
+- If real-time aggregation becomes expensive, an alternative approach is:
+  - **Pre-aggregating the like count** whenever a like is created or removed.
+- This is achieved by **denormalizing** the per-article like count into a separate table.
+
+---
+
+### ☑ Characteristics of Like Data
+
+- First, consider the characteristics of like count data.
+- Write traffic is relatively low.
+  - Users browse articles.
+  - Users explicitly perform the like action.
+- Data consistency is relatively important.
+  - Example inconsistency:
+    - 15 users liked the article, but the displayed count is 10.
+    - The list of users who liked the article does not match the count.
+- **When write traffic is moderate and consistency is important:**
+  - Relational database transactions can be utilized.
+  - Like creation/deletion and like count updates can be handled in a **single transaction**.
+  - Both tables use the same MySQL database.
+- However, this approach must consider the following constraints:
+  - Record Lock
+  - Distributed Transaction
+
+---
+
+### ☑ Record Lock
+
+- **Record (= Row)**
+  - A single row of data in a table
+- **Lock**
+  - A mechanism to prevent race conditions when multiple processes or threads
+    attempt to access shared resources concurrently
+- **Record Lock (= Row Lock)**
+  - A lock applied to a specific record
+  - Ensures data integrity and prevents race conditions during concurrent access
+- Article writes are typically performed by the author and occur infrequently.
+- Like count updates are performed by many users and occur more frequently.
+  - As a result, multiple independent users may contend for the same record.
+  - Article creation and like actions are logically independent from a user perspective.
+  - However, they may interfere at the database level.
+    - Example: article update fails due to like count contention
+- To avoid this issue, article data and like count data are separated
+  into independent tables via **denormalization**.
+
+---
+
+### ☑ Distributed Transaction
+
+- The system adopts a microservices architecture (MSA).
+- Each service owns an independent database.
+- The database is horizontally sharded.
+- For strong consistency between likes and like counts,
+  relational database transactions are considered.
+- However, distributed transactions are:
+  - Complex
+  - Slow
+  - Difficult to operate (covered in more detail in the Popular Article section)
+- To avoid distributed transactions:
+  - Like count tables are managed within the **Like Service database**.
+  - The shard key of the like count table is set to `article_id`,
+    identical to the like table.
+
+---
+
+### ☑ Concurrency Considerations
+
+- Under high traffic, concurrency issues are inevitable.
+- Multiple requests attempt to update the same like count record.
+- Therefore, concurrency control mechanisms are required.
+- The following approaches are considered:
+  - Pessimistic Lock
+  - Optimistic Lock
+  - Asynchronous Sequential Processing
+
+---
+
+### ☑ Lock Strategies
+
+- **Pessimistic Lock**
+  - Assumes conflicts are likely to occur.
+  - Uses record-level locking.
+
+~~~sql
+-- Method 1: Atomic update based on stored value
+UPDATE article_like_count
+SET like_count = like_count + 1
+WHERE article_id = {article_id};
+
+-- Method 2: Explicitly acquire lock using FOR UPDATE
+SELECT *
+FROM article_like_count
+WHERE article_id = {article_id}
+FOR UPDATE;
+~~~
+
+- Method 1 (UPDATE only) vs Method 2 (SELECT FOR UPDATE + UPDATE)
+  - Lock duration:
+    - Method 1: Lock acquired only during UPDATE (shorter duration)
+    - Method 2: Lock acquired from SELECT (longer duration)
+  - Application development:
+    - Method 1: Direct SQL-based increment
+    - Method 2: More object-oriented when using JPA entities
+
+- **Optimistic Lock**
+  - Assumes conflicts are rare.
+  - Uses a `version` column to track modifications
+    (supported via `@Version` in JPA).
+  - Conflict detection flow:
+    - Read data along with version
+    - Update with `WHERE version = ?` and increment version
+    - If update fails, a conflict occurred
+    - Rollback is handled at the application level
+
+- **Pessimistic vs Optimistic Lock**
+  - Pessimistic locking explicitly blocks concurrent access
+    but short locks on a single row may be acceptable.
+  - Optimistic locking avoids locks and reduces latency,
+    but requires retry logic in the application.
+
+---
+
+### ☑ Asynchronous Sequential Processing
+
+- Not all operations must be processed synchronously.
+- Requests can be enqueued and processed asynchronously.
+- If each article is processed sequentially by a single worker:
+  - Concurrency issues are eliminated.
+  - Lock contention and failure cases are minimized.
+- However, this approach has significant costs:
+  - Infrastructure for asynchronous processing
+  - Additional client-side handling due to delayed responses
+  - User experience considerations (optimistic UI, failure notifications)
+  - Ensuring exactly-once processing without duplication or loss
+- Due to these costs, this approach is **not adopted**
+  since like write traffic is not expected to be extremely high.
+
+---
+
+### ☑ Article Count & Comment Count Tables
+
+- For the Popular Article service,
+  article count and comment count tables are created
+  using the same design approach.
+- These tables support efficient ranking and aggregation.
+
+</details>
+
+

@@ -464,4 +464,134 @@ FOR UPDATE;
 
 </details>
 
+<details>
+<summary>
+
+## ✅ View Service
+
+</summary>
+
+---
+
+### ☑ View Count Design
+
+- View count abuse prevention policy
+    - Each user’s view for a single article is counted **once every 10 minutes**.
+    - Even if a user views the same article 100 times within 10 minutes, it is counted only once.
+- The view count only needs to store how many times an article has been viewed.
+    - Unlike like count, article count, or comment count, it is not derived from other data.
+    - Users cannot view detailed view history.
+    - Only the total view count needs to be displayed.
+    - Therefore, storing the total view count directly in a **single denormalized record** is sufficient.
+- Data consistency and write traffic considerations
+    - View count data has **relatively low consistency requirements**.
+    - Write traffic is **relatively high**.
+    - Therefore, using a relational database is not ideal:
+        - Transaction requirements are minimal.
+        - Disk access cost is expensive.
+- For managing view counts:
+    - An **in-memory database** can be used.
+    - We use **Redis**, which is widely adopted.
+
+---
+
+### ☑ Redis
+
+- **In-memory Database**
+    - High performance
+- **NoSQL (Not Only SQL) Database, Key-Value Store**
+    - Unlike relational databases, it has no fixed schema
+    - Allows flexible data models
+- **Supports Various Data Structures**
+    - String, List, Set, Sorted Set, Hash, etc.
+- **TTL (Time To Live) Support**
+    - Data is automatically deleted after a specified time
+- **Single Thread**
+    - Redis processes commands sequentially on a single thread.
+    - Since commands are executed one by one, it is advantageous for handling concurrency issues.
+- **Data Persistence Support**
+    - Although memory is volatile, Redis provides ways to persist data to disk
+      (AOF, RDB)
+- **Redis Cluster**
+    - A feature that enables horizontal scaling of Redis
+    - Supports logical sharding for scalability (16,384 slots)
+    - The hash value of a key determines the slot (logical shard),
+      and the slot determines the physical shard
+    - Provides distributed system capabilities for:
+        - Scalability
+        - Load balancing
+        - High availability
+    - Redis Cluster also supports data replication.
+    - This allows flexible 대응 during failures and provides high availability.
+    - Although we do not build Redis Cluster ourselves,
+      we assume an environment where Redis Cluster is already available.
+      In practice, we run a single Redis instance using Docker.
+
+---
+
+### ☑ Data Persistence
+
+- Although view count data has relatively low consistency requirements,
+  it **must not be completely lost**.
+- A certain level of persistence is required.
+- **AOF (Append Only File)**
+    - Records executed commands in a log file
+    - Data is restored by replaying the log
+- **RDB (Snapshot)**
+    - Periodically saves the in-memory data to disk
+- In addition, we build a **simple custom backup system**.
+- View count data can be backed up to **MySQL**, which is used as the primary database.
+- Time-based backup
+- Back up Redis data to MySQL every **N minutes**.
+    - Requires a batch or scheduling system
+    - Data may be lost if a failure occurs before backup
+- Count-based backup
+- Back up Redis data to MySQL every **N increments**.
+    - Can be handled easily at read time
+    - Data may be lost if a failure occurs before backup
+    - If the threshold is not reached, data may be lost
+    - A combination of both approaches is possible,
+      but for simplicity, we adopt the **count-based backup approach**.
+
+---
+
+### ☑ View Count Abuse Prevention Policy Design
+
+- Why abuse prevention is necessary
+    - Viewing an article increases its view count.
+    - Abusers may repeatedly view a specific article to manipulate data.
+    - If popular articles are selected based on view count,
+      manipulated data can lead to incorrect rankings.
+- How can we identify whether a view should be counted?
+    - Logged-in users: can be identified per user.
+    - Non-logged-in users: can be identified using IP, User-Agent,
+      browser cookies, tokens, etc.
+    - For simplicity, we only consider **logged-in users** and identify them using `userId`.
+- View count abuse prevention design
+    - **Using MySQL (checking view history within 10 minutes)**
+        - However, Redis was chosen for performance reasons.
+        - Reintroducing MySQL would defeat the purpose.
+        - Concurrency issues may occur:
+            - MySQL requires locks.
+            - Redis operates as a single-threaded system, which is advantageous.
+        - MySQL does not support automatic data expiration.
+        - Redis supports TTL (Time To Live).
+    - **Using Redis**
+        - When a view request arrives, store data in Redis with TTL = 10 minutes.
+        - Since views are identified per user, the key becomes:
+          `key = (articleId + userId)`
+        - Use a command that fails if the key already exists.
+        - `setIfAbsent`: stores data only if it does not already exist.
+        - If successful:
+            - No previous view exists → increment the view count.
+        - If failed:
+            - A previous view exists → do not increment the view count.
+- This process can be considered as acquiring a **lock** for view count increment.
+    - The system is a scalable distributed system.
+    - Scale-out is assumed.
+    - The View Service consists of multiple server applications.
+    - Acquiring a lock in such a distributed environment is called a
+      **Distributed Lock**.
+
+</details>
 

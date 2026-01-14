@@ -595,3 +595,344 @@ FOR UPDATE;
 
 </details>
 
+<details>
+<summary>
+
+## ✅ Hot Article Service **- Design**
+
+</summary>
+
+---
+
+### ☑ Hot Article Policy
+
+- Select **Top 10 hot articles per day**
+    - Updated **daily at 1:00 AM**
+    - Score is calculated based on:
+        - Number of likes
+        - Number of comments
+        - Number of views
+    - Score formula:
+        - `score = (likes * 3) + (comments * 2) + (views * 1)`
+    - Supports querying hot articles for the **last 7 days**
+
+- A batch-based approach can be considered.
+    - At midnight, iterate over all articles created on the previous day.
+    - For each article:
+        - Query like count, view count, and comment count.
+        - Calculate the article score.
+    - Select the top 10 articles based on the calculated scores.
+
+- Limitations of batch processing
+    - The number of articles to process can be extremely large,
+      resulting in long execution times.
+        - What if hot articles must be updated immediately at 00:00?
+    - Parallel processing may be introduced to improve performance.
+        - However, this significantly increases design and implementation complexity.
+        - Even with parallelism, fundamental issues remain.
+    - Hot article selection requires a massive number of queries
+      across multiple services.
+        - This can cause traffic spikes and overload other services.
+        - The hot article job itself may negatively impact unrelated services.
+
+---
+
+### ☑ Stream Processing
+
+- **Stream**
+    - A continuous flow of data
+    - Examples include real-time logs or continuously generated events
+
+- **Stream Processing**
+    - Processing data as it continuously arrives
+    - Enables real-time or near real-time computation
+
+- A stream processing application can be built by consuming
+  the following real-time events:
+    - Article created / updated / deleted events
+    - Comment created / deleted events
+    - Like created / deleted events
+    - View count increment events
+
+---
+
+### ☑ Hot Article Architecture
+
+- Hot article processing flow:
+    1. Receive events required for hot article selection as streams.
+    2. Continuously calculate scores for each article in real time.
+    3. Maintain a real-time **Top 10 hot article list**.
+    4. Clients query the hot article list.
+
+- The Hot Article Service consumes events from:
+    - Article Service
+    - Comment Service
+    - Like Service
+    - View Service
+
+- The Hot Article Service acts as a **data processor** that
+  transforms incoming events into hot article data.
+
+- Hot article data is managed using **Redis Sorted Set (ZSET)**.
+    - Maintains articles in sorted order by score.
+    - Efficiently retrieves the top 10 articles.
+
+---
+
+### ☑ Hot Article Event Design
+
+- **Direct API-based approach**
+    - Each service sends events directly to the Hot Article Service via API.
+    - Easy to implement.
+    - Increases coupling between services.
+
+- **Message Broker-based approach**
+    - Article / Like / Comment / View services publish events
+      to a message broker.
+    - The Hot Article Service consumes and processes these events.
+    - More complex to implement.
+    - Significantly reduces service-to-service coupling.
+
+---
+
+### ☑ Hot Article Score Calculation
+
+- The Hot Article Service receives events **independently**:
+    - Comment events do not include current like or view counts.
+    - Like events do not include comment counts.
+    - View events only indicate a single increment.
+
+- To calculate scores, the current state of all required metrics
+  must be known.
+
+- One possible approach is to query other services via API.
+    - However, this tightly couples the Hot Article Service
+      to other services.
+    - Hot article processing traffic would propagate load
+      to other services.
+
+- Current score calculation uses:
+    - Like count
+    - Comment count
+    - View count
+
+- These values are originally owned by their respective services.
+    - However, consider a future requirement:
+        - Example: score depends on the number of **unique commenters**.
+        - This data may not exist in the Comment Service.
+        - The Comment Service should not be responsible
+          for producing data solely for hot article computation.
+
+- Therefore, the Hot Article Service maintains its **own derived data**.
+    - Raw events are consumed and transformed into
+      hot-article-specific metrics.
+    - The service independently manages and updates
+      all data required for score calculation.
+    - No synchronous dependency on other services is required.
+
+- Since hot article data only needs to be retained **per day**:
+    - Data volume is limited.
+    - Fast access is critical.
+    - Data can be volatile.
+- Redis is chosen as the storage:
+    - In-memory
+    - High performance
+    - Suitable for short-lived, frequently updated data
+
+</details>
+
+<details>
+<summary>
+
+## ✅ Hot Article Service - Producer
+
+</summary>
+
+---
+
+### ☑ Transactional Messaging
+
+- Article / Comment / Like / View services act as **Producers** that publish events to Kafka.
+    - A Producer’s responsibility is to reliably deliver defined events to Kafka.
+    - But can event delivery always be handled safely?
+    - To answer this, we need to understand **Transactional Messaging**.
+
+- Transaction management is critical for ensuring **data consistency and atomicity**.
+- Kafka is assumed to be a reliable system.
+    - If a Consumer commits its offset **after successfully processing events**,
+      data loss can be avoided.
+    - But what happens if a failure occurs **while a Producer is sending events to Kafka**?
+        - Since the data has not yet been delivered to Kafka,
+          the event may be permanently lost.
+        - This leads to **data inconsistency across services**.
+
+- To prevent this, **business logic execution and event publishing**
+  must be treated as a **single transactional unit**.
+    - This does not need to be strictly synchronous.
+    - **Eventual consistency** is acceptable.
+    - However, MySQL state changes and Kafka message publishing
+      cannot be wrapped in a single MySQL transaction
+      because they are **different systems**.
+
+- Kafka publishing can be placed inside a MySQL transaction block:
+
+    ```sql
+    1. Transaction start
+    2. Execute business logic
+    3. publishEvent()
+    4. commit or rollback
+    ```
+
+- But this approach introduces serious problems:
+    - If Kafka is temporarily unavailable and `publishEvent()` blocks for 3 seconds:
+        - The database transaction is held for 3 seconds.
+        - Kafka failure can propagate to the application and MySQL.
+    - The database transaction may fail after
+      the Kafka event has already been published.
+    - If `publishEvent()` is asynchronous,
+      rollback becomes even harder when event delivery fails.
+
+- So how can two different systems be treated as one transaction?
+- **Distributed transaction management** is required.
+
+---
+
+### ☑ Two Phase Commit
+
+- Two Phase Commit (2PC) is a protocol used
+  when multiple distributed systems participate in a single transaction.
+- If all participants succeed → commit
+- If any participant fails → rollback
+- As the name suggests, it consists of two phases:
+    - **Prepare phase**
+    - **Commit phase**
+
+- **Prepare Phase**
+    - The Coordinator asks all participants
+      whether they are ready to commit.
+    - Each participant responds with its readiness status.
+
+- **Commit Phase**
+    - If all participants respond positively,
+      the Coordinator instructs all participants to commit.
+    - Each participant commits its transaction.
+
+- However, several critical issues remain:
+    - Overall latency increases because all participants must wait.
+    - If the Coordinator or a participant fails,
+      others may remain blocked, unaware of the final state.
+    - Kafka and MySQL do not natively support
+      such tightly coupled transactional integration.
+
+---
+
+### ☑ Transactional Outbox
+
+- Event publishing cannot be directly included
+  in a typical database transaction.
+- However, **event metadata can be stored inside the database transaction**.
+    - An **Outbox table** is created in a transactional database.
+    - Business logic execution and event record insertion
+      are wrapped in a **single database transaction**.
+
+- A **Message Relay** reads unpublished events from the Outbox table.
+    - The Message Relay is responsible for publishing events
+      to the Message Broker.
+    - This component is implemented directly within the system.
+
+---
+
+### ☑ Transaction Log Tailing
+
+- A technique that tracks and analyzes database transaction logs.
+    - Databases record changes in transaction logs:
+        - MySQL binlog
+        - PostgreSQL WAL
+        - SQL Server Transaction Log
+
+- These logs can be read to publish events to a Message Broker.
+    - This approach leverages **CDC (Change Data Capture)**.
+    - CDC tracks data changes and propagates them to other systems.
+
+- A **Transaction Log Miner**:
+    - Reads transaction logs
+    - Publishes events to the Message Broker
+
+- If tracking changes in data tables alone is sufficient,
+  the Outbox table may be omitted.
+
+---
+
+### ☑ Transactional Outbox vs Transaction Log Tailing
+
+- We adopt **Transactional Outbox**.
+
+- Transaction Log Tailing:
+    - Requires CDC infrastructure.
+    - Directly couples message semantics
+      to low-level database change logs.
+
+- Transactional Outbox:
+    - Introduces additional tables and operational overhead.
+    - But allows **explicit, well-defined event models**
+      independent of database internals.
+    - Provides clearer intent and better long-term maintainability.
+
+---
+
+### ☑ Transactional Outbox – Detailed Design
+
+- **Message Relay**
+    - Periodically polls the Outbox table
+      for unpublished events and sends them to Kafka.
+        - If polling is too frequent → database overload
+        - If polling is too slow → event delivery latency
+        - Polling interval is set to **10 seconds**
+
+    - Even with polling, latency can still be large.
+        - After a service transaction commits,
+          the event can be immediately delivered to the Message Relay.
+        - The Message Relay asynchronously publishes it to Kafka.
+        - Polling is only required for failed transmissions.
+
+    - However, this introduces multiple event delivery paths:
+        - Events may be duplicated.
+        - Duplicate delivery is acceptable.
+
+    - Consumers must be **idempotent**.
+        - The Hot Article Service stores data in Redis Key-Value form.
+        - Idempotent processing is guaranteed by design.
+
+    - Successfully delivered events are deleted from the Outbox table.
+
+- **Coordinator**
+    - The system is distributed:
+        - Multiple application instances
+        - Horizontally sharded databases
+
+    - How should Message Relay polling be handled?
+        - Without coordination, every instance polls every shard.
+        - This leads to:
+            - Duplicate processing
+            - Increased latency
+
+    - A Coordinator inside Message Relay assigns shards
+      so that each instance processes **only a subset**.
+
+    - Coordinator behavior:
+        - Sends a ping every 3 seconds
+          containing:
+            - Application identifier
+            - Current timestamp
+        - Maintains active application list
+          in a central storage.
+        - If no ping is received for 9 seconds,
+          the instance is considered dead and removed.
+        - Central storage is implemented using **Redis Sorted Set**.
+            - Application identifier + last ping time
+            - Automatically ordered by timestamp
+
+- Message Relay is implemented as a **shared module**.
+- The Coordinator is also implemented within the Message Relay.
+
+</details>

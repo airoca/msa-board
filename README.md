@@ -936,3 +936,270 @@ FOR UPDATE;
 - The Coordinator is also implemented within the Message Relay.
 
 </details>
+
+<details>
+<summary>
+
+## ✅ Article Read Optimization
+
+</summary>
+
+---
+
+### ☑ Article Read Requirements
+
+- **Article read optimization goals**
+    - Optimize single-article read performance
+    - Optimize article list retrieval
+    - Define an effective cache strategy
+    - Design a read-optimized caching architecture
+
+- **Characteristics of a board service**
+    - Read traffic overwhelmingly exceeds write traffic.
+    - Articles are never shown alone.
+        - Article content
+        - Like count
+        - Comment count
+        - View count
+        - Author information
+    - With data distributed across multiple services,
+      how should the client retrieve everything efficiently?
+
+- A naive approach:
+    - Client requests article data from the Article Service.
+    - Article Service synchronously requests data from:
+        - Comment Service
+        - Like Service
+        - View Service
+    - The Article Service aggregates the data and returns the response.
+
+---
+
+### ☑ Limitations of Direct Article Read
+
+- In board services, read traffic can far exceed write traffic.
+    - What if servers must be scaled solely due to read load?
+    - Scaling read capacity also unnecessarily scales write capacity.
+
+- Service dependency and circular reference issues
+    - Previously, the Article Service had no dependency
+      on Comment / Like / View services.
+    - Article read requirements introduce new dependencies.
+    - Bidirectional references are created:
+        - Comment / Like / View services store `articleId`
+          and must validate article existence.
+        - Article Service must query other services
+          to assemble read responses.
+    - This leads to **circular dependencies**.
+
+- Consequences of circular dependencies:
+    - Services cannot be independently deployed or maintained.
+    - Failures propagate across services.
+    - Testing becomes more complex and fragile.
+
+---
+
+### ☑ Article Read Service
+
+- A dedicated **Article Read Service** can be introduced.
+- Client requests data from the Article Read Service.
+- The Article Read Service:
+    - Fetches data from each microservice
+    - Aggregates and returns the response
+
+- By isolating read responsibilities:
+    - Circular dependencies are eliminated.
+    - Each microservice regains independence.
+    - Read services can be scaled independently
+      without affecting write workloads.
+
+- However, inefficiencies still remain:
+    - Network overhead from multiple service calls
+    - Load propagation to upstream services
+    - Increased aggregation and query cost
+
+- To address these issues, **CQRS** is applied.
+
+---
+
+### ☑ CQRS (Command Query Responsibility Segregation)
+
+- Separates **Command** (write) and **Query** (read) responsibilities.
+- Data modification and data retrieval are handled independently.
+
+- How does the Article Read Service obtain data?
+    - Pulling data synchronously from Command services
+      still propagates load.
+    - Instead, the Article Read Service maintains
+      its own **Query Database**.
+
+- How does the Query Database stay up to date?
+    - Polling APIs periodically
+    - Consuming events from a Message Broker
+    - API polling reintroduces coupling and load propagation.
+    - Since a Message Broker already exists,
+      event-based synchronization is preferred.
+
+- Query Model design:
+    - Query models do not mirror Command data models.
+    - They are optimized for read efficiency.
+    - Denormalized structure:
+        - Article
+        - Comment count
+        - Like count
+    - A single Query Model fetch satisfies most read requests.
+
+---
+
+### ☑ Query Database Design
+
+- **Redis** is chosen as the Query Database.
+    - In-memory storage
+    - Extremely fast read performance
+    - Higher cost per capacity compared to disk-based storage
+
+- Board service access patterns:
+    - Most reads target **recent articles**.
+    - Older articles are accessed far less frequently.
+
+- Strategy:
+    - Store only recent articles in Redis.
+    - Apply TTL of **1 day**.
+    - Redis retains only articles created
+      within the last 24 hours.
+
+- Cache miss handling:
+    - When data expires, the Query Model is rebuilt
+      by requesting original data from Command services.
+    - This happens infrequently and incurs low overhead.
+    - Improves resilience against:
+        - Redis failures
+        - Event loss
+        - Partial data inconsistency
+    - However, failure propagation risk must still be considered.
+
+---
+
+### ☑ Why View Count Is Not Denormalized
+
+- View count characteristics:
+    - View count increases with read traffic.
+    - Reads trigger writes.
+
+- Problems with denormalizing view count:
+    - Every view would require rebuilding the Query Model.
+    - This is inefficient and unnecessary.
+
+- View count already:
+    - Is stored in Redis within the View Service.
+    - Is optimized for frequent updates.
+
+- View count events:
+    - Are not emitted in real time.
+    - Are sent only during periodic backups
+      (e.g., every 100 increments).
+
+- Strategy:
+    - Fetch view count directly from the View Service.
+    - Apply short-lived caching in the Article Read Service
+      to reduce load.
+    - Further optimized in the cache optimization section.
+
+---
+
+### ☑ Article List Read Optimization
+
+- The Article Service’s MySQL database
+  handles all article list queries.
+    - Queries are already index-optimized.
+    - But database load remains high.
+
+- Can Redis be used here as well?
+    - Reduce load on MySQL
+    - Improve read latency
+
+- Challenges:
+    - Article lists change frequently due to:
+        - Article creation
+        - Article deletion
+    - Traditional page-based caching
+      becomes stale immediately.
+
+- Standard cache approach (`@Cacheable`):
+    - Check cache by key
+    - If cache hit → return cached data
+    - If cache miss → query DB, cache result, return
+    - But page-level caching quickly becomes outdated.
+
+- Precompute cache strategy:
+    - Update cached article lists proactively
+      on article create/delete events.
+    - Article Read Service already consumes these events.
+
+- Memory constraints:
+    - Memory is more expensive than disk.
+    - Storing all list data is impractical.
+
+- Access pattern optimization:
+    - Users usually land on the **first page**.
+    - Recent articles receive most of the traffic.
+    - Older pages are rarely accessed.
+
+- Strategy:
+    - Cache only the **latest 1000 articles** per board in Redis.
+    - When client requests:
+        - If within latest 1000 → Redis
+        - Otherwise → Article Service
+
+---
+
+### ☑ Cache Optimization
+
+- Short-lived caching is applied to view count retrieval.
+- Standard `@Cacheable` flow:
+    1. Check cache
+    2. If exists → return cached data
+    3. If missing → fetch original data
+    4. Store in cache and return
+
+- Problem under high concurrency:
+    - Cache expiration causes multiple concurrent cache misses.
+    - Multiple requests hit the original data source.
+    - Cache is rebuilt multiple times redundantly.
+
+- Using distributed locks?
+    - Only one request refreshes cache.
+    - Others wait.
+    - This introduces latency and inefficiency.
+
+- **Logical TTL vs Physical TTL strategy**
+    - Logical TTL: determines when refresh should occur
+    - Physical TTL: determines actual data expiration
+    - Condition:
+        - Logical TTL < Physical TTL
+
+- Example:
+    - Logical TTL = 10 seconds
+    - Physical TTL = 15 seconds
+
+- Behavior:
+    - Request 1 detects Logical TTL expiration.
+    - Acquires distributed lock.
+    - Refreshes cache.
+    - Request 2 arrives during refresh.
+    - Fails to acquire lock.
+    - Returns existing cached data
+      (still valid due to Physical TTL).
+
+- Distributed lock implementation:
+    - Redis `setIfAbsent` is sufficient.
+
+- Trade-off:
+    - Slightly stale data may be served temporarily.
+    - Not suitable for all use cases.
+
+- This technique collapses multiple identical requests
+  into a single refresh operation.
+- This pattern is known as **Request Collapsing**.
+
+</details>
